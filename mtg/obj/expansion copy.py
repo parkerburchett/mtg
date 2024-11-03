@@ -4,8 +4,9 @@ import time
 import numpy as np
 import pandas as pd
 from mtg.obj.cards import CardSet
-from mtg.obj.dataloading_utils import get_card_rating_data, load_data
-
+# from mtg.obj.dataloading_utils import get_card_rating_data, load_data
+import requests
+import re
 
 class Expansion:
     def __init__(
@@ -20,24 +21,28 @@ class Expansion:
         idx_to_name=None,
     ):
         self.expansion = expansion
-        self.cards = self.get_cards_from_scryfall() # primary source of truth, names are correct
-        
-        self.clean_card_df(idx_to_name)
-
+        self.cards = self.get_cards_from_scryfall()
+        print('got cards from scryfall')
         self.bo1 = self.process_data(bo1, name="bo1")
         self.bo3 = self.process_data(bo3, name="bo3")
         self.quick = self.process_data(quick, name="quick")
         self.draft = self.process_data(draft, name="draft")
         self.replay = self.process_data(replay, name="replay")
         if ml_data:
-            self.card_data_for_ML = self.get_card_data_for_ML()
+            print('trying ml data')
+            self.card_data_for_ML = self.get_card_data_for_ML() # broken
+            print('worked ml data')
+
         else:
             self.card_data_for_ML = None
-            
+        print('trying create_data_dependent_attributes')
         self.create_data_dependent_attributes()
+        print('worked create_data_dependent_attributes')
+
         
     def get_cards_from_scryfall(self):
-        return CardSet([f"set={self.expansion}", "is:booster"]).to_dataframe()
+        cards_df =  CardSet([f"set={self.expansion}", "is:booster"]).to_dataframe()
+        return cards_df
 
     @property
     def types(self):
@@ -52,13 +57,18 @@ class Expansion:
         ]
 
     def process_data(self, file_or_df, name=None):
+        pass
+        
         if isinstance(file_or_df, str):
             if name is None:
                 df = pd.read_csv(file_or_df)
-            else:
-                df = load_data(file_or_df, self.cards.copy(), name=name)
+            elif  name == 'bo1':
+                df = load_bo1_data(file_or_df, self.cards.copy())
+            elif name  == 'draft':
+                df = load_draft_data(file_or_df, self.cards.copy())
         else:
             df = file_or_df
+        
         return df
 
     def clean_card_df(self, idx_to_name=None):
@@ -79,56 +89,25 @@ class Expansion:
         #      ways to handle other layouts like split cards too
         self.cards["flip"] = self.cards["layout"].apply(lambda x: 0.0 if x == "normal" else 1.0)
         self.cards = self.cards.sort_values(by="idx")
-        print(self.cards.shape)
-        pass
-    
-    
-    def _get_ml_data_from_card_stats(self):
-        ml_data = self.get_card_stats_from_17_lands()
+
+    def get_card_data_for_ML(self, return_df=True):
+        ml_data = self.get_card_stats()
+        colors = list("WUBRG")
         cards = self.cards.set_index("name").copy()
-        new_ml_data_indexes = []
-        for name in ml_data.index:
-            
-            if name in cards.index:
-                new_ml_data_indexes.append(name)
-            else:
-                
-                if name[:2] == 'a-':
-                    new_name = name[2:]
-                    new_ml_data_indexes.append(new_name)
-                else:
-                    new_ml_data_indexes.append(name)
-            
-        ml_data.index = new_ml_data_indexes       
-        
+        # Power/Toughness sometimes has "*" instead of numbers, so need to
+        # convert variable P/Ts to unique integers so that it can feed to the model
         cards = cards.replace(to_replace="1+*", value=-1)
         cards = cards.replace(to_replace="*", value=-1)
         copy_from_scryfall = ["power", "toughness", "basic_land_search", "flip", "cmc"]
         for column in copy_from_scryfall:
-            if column in cards:
+            if column in cards.columns: # added nov 2, 2024
                 ml_data[column] = cards[column].astype(float)
-            else:
-                print(f'{column=} is not in cards')
-        
-        return ml_data, cards
-        
-    def get_card_data_for_ML(self, return_df=True):
-        ml_data, cards = self._get_ml_data_from_card_stats()
-        
-        for card in self.cards['name']:
-            if card not in ml_data.index:
-                print(card)
-        
-    
         keywords = list(set(cards["keywords"].sum()))
         keyword_df = pd.DataFrame(index=cards.index, columns=keywords).fillna(0)
         for card_idx, keys in cards["keywords"].to_dict().items():
             keyword_df.loc[card_idx, keys] = 1.0
-            
-        
-        ml_data = ml_data.join(keyword_df, how='left')
-        
-        for color in list("WUBRG"):
+        ml_data = pd.concat([ml_data, keyword_df], axis=1)
+        for color in colors:
             ml_data[color + " pips"] = cards["mana_cost"].apply(lambda x: x.count(color))
             ml_data["produces " + color] = cards["produced_mana"].apply(
                 lambda x: 0.0 if not isinstance(x, list) else int(color in x)
@@ -155,14 +134,11 @@ class Expansion:
         ml_data["bias"] = 1.0
         ml_data = ml_data.fillna(0).sort_values("idx").reset_index(drop=True)
         ml_data = ml_data.drop("idx", axis=1)
-        
         if return_df:
             return ml_data
-        
         return ml_data.values
 
-
-    def get_card_stats_from_17_lands(self):
+    def get_card_stats(self):
         all_colors = [
             None,
             "W",
@@ -197,24 +173,14 @@ class Expansion:
             "UBRG",
             "WUBRG",
         ]
-        card_save_name_parquet = f'{self.expansion}_card_df.parquet'
-        try:
-            card_df = pd.read_parquet(card_save_name_parquet)
-            print('got loaded card_df')
-            return card_df
-        except Exception as e:
-            print(e)
-            
-            card_df = pd.DataFrame()
-            for colors in all_colors:
-                time.sleep(1)
-                card_data_df = get_card_rating_data(self.expansion, colors=colors)
-                extension = "" if colors is None else "_" + colors
-                card_data_df.columns = [col + extension for col in card_data_df.columns]
-                card_df = pd.concat([card_df, card_data_df], axis=1).fillna(0.0)
-            card_df.to_parquet(card_save_name_parquet)
-            print('saved card_df')
-            return card_df # correct no basics, 261 cards
+        card_df = pd.DataFrame()
+        for colors in all_colors:
+            time.sleep(1)
+            card_data_df = get_card_rating_data(self.expansion, colors=colors)
+            extension = "" if colors is None else "_" + colors
+            card_data_df.columns = [col + extension for col in card_data_df.columns]
+            card_df = pd.concat([card_df, card_data_df], axis=1).fillna(0.0)
+        return card_df
 
     def get_bo1_decks(self):
         d = {column: "last" for column in self.bo1.columns if column not in ["opp_colors"]}
@@ -413,6 +379,7 @@ class SNC(Expansion):
             ml_data=ml_data,
             idx_to_name=idx_to_name,
         )
+        print('SNC init works')
 
     @property
     def types(self):
@@ -499,40 +466,223 @@ def get_expansion_obj_from_name(expansion):
     raise ValueError(f"{expansion} does not have a corresponding Expansion object.")
 
 
-
-import pickle
-import argparse
-
-
-
-def main():
-    EXPANSION = get_expansion_obj_from_name(FLAGS.expansion)
-    expansion = EXPANSION(bo1=FLAGS.game_data, draft=FLAGS.draft_data, ml_data=True)
-    with open(FLAGS.expansion_fname, "wb") as f:
-        pickle.dump(expansion, f)
-    print('success!!!')
+def load_data(filename, cards, name=None):
+    print('tryign to load data')
+    
+    if name == "draft":
+        return load_draft_data(filename, cards)
+    elif name == "bo1":
+        return load_bo1_data(filename, cards)
+    else:
+        return pd.read_csv(filename)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--expansion",
-        type=str,
-        default="SNC",
-        help="name of magic expansion corresponding to data files",
+def sort_cols_by_card_idxs(df, card_col_prefixes, cards):
+    # initialize columns to start with the non-card columns
+    column_order = [
+        c
+        for c in df.columns
+        if not any([c.startswith(prefix) for prefix in card_col_prefixes])
+    ]
+    card_names = cards.sort_values(by="idx", ascending=True)["name"].tolist()
+    for prefix in card_col_prefixes:
+        prefix_columns = [prefix + "_" + name for name in card_names]
+        column_order += prefix_columns
+    # reorder dataframe to abide by new column ordering
+    #   this is just so df[self.deck_cols].to_numpy()
+    #   yields a comparable matrix to df[self.sideboard_cols].to_numpy()
+    df = df[column_order]
+    return df
+
+
+
+def load_bo1_data(filename, cards):
+    print('trying to load_bo1_data')
+    pass
+    COLUMN_REGEXES = {
+        re.compile(r"user_game_win_rate_bucket"): "float32",
+        re.compile(r"rank"): "str",
+        re.compile(r"draft_id"): "str",
+        re.compile(r"draft_time"): "str",
+        re.compile(r"expansion"): "str",
+        re.compile(r"event_type"): "str",
+        re.compile(r"deck_.*"): "int8",
+        re.compile(r"sideboard_.*"): "int8",
+        re.compile(r"drawn_.*"): "int8",
+        re.compile(r"sideboard_.*"): "int8",
+        re.compile(r"opening_hand_.*"): "int8",
+        re.compile(r"on_play"): "int8",
+        re.compile(r"won"): "int8",
+        re.compile(r"num_turns"): "int8",
+        re.compile(r"num_mulligans"): "int8",
+        re.compile(r"opp_num_mulligans"): "int8",
+    }
+    col_names = pd.read_csv(filename, nrows=0).columns
+    data_types = {}
+    draft_cols = []
+    for c in col_names:
+        if any(
+            [
+                c.startswith(prefix)
+                for prefix in ["sideboard_", "deck_", "drawn_", "opening_hand_"]
+            ]
+        ):
+            draft_cols.append(c)
+        for (r, t) in COLUMN_REGEXES.items():
+            if r.match(c):
+                data_types[c] = t
+
+    df = pd.read_csv(
+        filename,
+        dtype=data_types,
+        usecols=[
+            "draft_id",
+            "draft_time",
+            "won",
+            "user_game_win_rate_bucket",
+            "rank",
+            "on_play",
+            "num_turns",
+            "num_mulligans",
+            "opp_num_mulligans"
+            # ...
+        ]
+        + draft_cols,
     )
-    parser.add_argument(
-        "--game_data", type=str, default="/home/parker/Documents/Github/mtg/data/game_data_public.SNC.PremierDraft.csv", help="path to bo1 game data"
-    )
-    parser.add_argument(
-        "--draft_data", type=str, default="/home/parker/Documents/Github/mtg/data/draft_data_public.SNC.PremierDraft.csv", help="path to bo1 draft data"
-    )
-    parser.add_argument(
-        "--expansion_fname",
-        type=str,
-        default="expansion.pkl",
-        help="path/to/fname.pkl for where we should store the expansion object",
-    )
-    FLAGS, unparsed = parser.parse_known_args()
-    main()
+    rename_cols = {
+        "user_game_win_rate_bucket": "user_win_rate_bucket",
+        "draft_time": "date",
+    }
+    df.columns = [
+        x.lower() if x not in rename_cols else rename_cols[x] for x in df.columns
+    ]
+    df["won"] = df["won"].astype(float)
+    df["date"] = pd.to_datetime(df["date"])
+    card_col_prefixes = ["deck", "opening_hand", "drawn", "sideboard"]
+    df = sort_cols_by_card_idxs(df, card_col_prefixes, cards)
+    return df
 
+
+def load_draft_data(filename, cards):
+    COLUMN_REGEXES = {
+        re.compile(r"user_game_win_rate_bucket"): "float32",
+        re.compile(r"user_n_games_bucket"): "int8",
+        re.compile(r"rank"): "str",
+        re.compile(r"draft_id"): "str",
+        re.compile(r"draft_time"): "str",
+        re.compile(r"expansion"): "str",
+        re.compile(r"event_type"): "str",
+        re.compile(r"event_match_wins"): "int8",
+        re.compile(r"event_match_losses"): "int8",
+        re.compile(r"pack_number"): "int8",
+        re.compile(r"pick_number"): "int8",
+        re.compile(r"pick$"): "str",
+        re.compile(r"pick_maindeck_rate"): "float32",
+        re.compile(r"pick_sideboard_in_rate"): "float32",
+        re.compile(r"pool_.*"): "int8",
+        re.compile(r"pack_card_.*"): "int8",
+    }
+    col_names = pd.read_csv(filename, nrows=0).columns
+    data_types = {}
+    draft_cols = []
+    for c in col_names:
+        if c.startswith("pack_card_"):
+            draft_cols.append(c)
+        elif c == "pick":
+            draft_cols.append(c)
+        elif c.startswith("pool_"):
+            draft_cols.append(c)
+        for (r, t) in COLUMN_REGEXES.items():
+            if r.match(c):
+                data_types[c] = t
+
+    df = pd.read_csv(
+        filename,
+        dtype=data_types,
+        usecols=[
+            "draft_id",
+            "draft_time",
+            "event_match_losses",
+            "event_match_wins",
+            "pack_number",
+            "pick_number",
+            "user_n_games_bucket",
+            "user_game_win_rate_bucket",
+            "rank"
+            # ...
+        ]
+        + draft_cols,
+    )
+    rename_cols = {
+        "user_game_win_rate_bucket": "user_win_rate_bucket",
+        "draft_time": "date",
+    }
+    df.columns = [
+        x.lower() if x not in rename_cols else rename_cols[x] for x in df.columns
+    ]
+    n_picks = df.groupby("draft_id")["pick"].count()
+    t = n_picks.max()
+    bad_draft_ids = n_picks[n_picks < t].index.tolist()
+    df = df[~df["draft_id"].isin(bad_draft_ids)]
+    df["pick"] = df["pick"].str.lower()
+    df["date"] = pd.to_datetime(df["date"])
+    df["won"] = (
+        df["event_match_wins"] / (df["event_match_wins"] + df["event_match_losses"])
+    ).fillna(0.0)
+    card_col_prefixes = ["pack_card", "pool"]
+    df = sort_cols_by_card_idxs(df, card_col_prefixes, cards)
+    df["position"] = (
+        df["pack_number"] * (df["pick_number"].max() + 1) + df["pick_number"]
+    )
+    df = df.sort_values(by=["draft_id", "position"])
+    return df
+
+
+def get_card_rating_data(expansion, endpoint=None, start=None, end=None, colors=None):
+    if endpoint is None:
+        endpoint = f"https://www.17lands.com/card_ratings/data?expansion={expansion.upper()}&format=PremierDraft"
+        if start is not None:
+            endpoint += f"&start_date={start}"
+        if end is not None:
+            endpoint += f"&end_date={end}"
+        if colors is not None:
+            endpoint += f"&colors={colors}"
+    card_json = requests.get(endpoint).json()
+    card_df = pd.DataFrame(card_json).fillna(0.0)
+    numerical_cols = card_df.columns[card_df.dtypes != object]
+    card_df["name"] = card_df["name"].str.lower()
+    card_df = card_df.set_index("name")
+    return card_df[numerical_cols]
+
+
+def get_draft_json(draft_log_url, stream=False):
+    if not stream:
+        base_url = "https://www.17lands.com/data/draft?draft_id="
+    else:
+        base_url = "https://www.17lands.com/data/draft/stream/?draft_id="
+    draft_ext = draft_log_url.split("/")[-1].strip()
+    log_json_url = base_url + draft_ext
+    response = requests.get(log_json_url, stream=stream)
+    if not stream:
+        response = response.json()
+    return response
+
+
+
+
+def make_expansion():
+    import pickle
+    expansion = SNC(bo1="/home/parker/Documents/Github/mtg/data/game_data_public.SNC.PremierDraft.csv",
+                          draft="/home/parker/Documents/Github/mtg/data/draft_data_public.SNC.PremierDraft.csv", ml_data=True)
+    
+    return expansion
+    # pass
+    
+    # with open("expansion.pkl", "wb") as f:
+    #     pickle.dump(expansion, f)
+        
+    
+
+if __name__ == '__main__':
+    expansion = make_expansion()
+    pass

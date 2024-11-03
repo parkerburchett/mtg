@@ -1,6 +1,7 @@
 import argparse
 from mtg.ml.generator import DraftGenerator, create_train_and_val_gens
 from mtg.ml.models import DraftBot
+from mtg.obj.expansion import SNC
 import pickle
 from mtg.ml.trainer import Trainer
 import tensorflow as tf
@@ -10,6 +11,7 @@ def main():
     with open(FLAGS.expansion_fname, "rb") as f:
         expansion = pickle.load(f)
 
+    print('loaded')
     train_gen, val_gen = create_train_and_val_gens(
         expansion.draft,
         expansion.cards.copy(),
@@ -19,7 +21,7 @@ def main():
         generator=DraftGenerator,
         include_val=True,
     )
-
+      
     model = DraftBot(
         expansion=expansion,
         emb_dim=FLAGS.emb_dim,
@@ -32,9 +34,8 @@ def main():
         memory_dropout=FLAGS.transformer_dropout,
         name="DraftBot",
     )
-
     model.compile(
-        learning_rate={"warmup_steps": FLAGS.lr_warmup},
+        # learning_rate={"warmup_steps": FLAGS.lr_warmup},
         margin=FLAGS.emb_margin,
         emb_lambda=FLAGS.emb_lambda,
         rare_lambda=FLAGS.rare_lambda,
@@ -46,11 +47,10 @@ def main():
         generator=train_gen,
         val_generator=val_gen,
     )
-    trainer.train(
-        FLAGS.epochs,
-        print_keys=["prediction_loss", "embedding_loss", "rare_loss", "cmc_loss"],
-        verbose=FLAGS.verbose,
-    )
+    print('got to trainer')
+    trainer.train(FLAGS.epochs, print_keys=["prediction_loss", "embedding_loss", "rare_loss", "cmc_loss"],verbose=FLAGS.verbose)
+
+    print('did training')
     # we run inference once before saving the model in order to serialize it with the right input parameters for inference
     # and we do it with train_gen because val_gen can be None, and this isn't used for validation but serialization
     x, y, z = train_gen[0]
@@ -62,6 +62,8 @@ def main():
     )
     output, attention = model(model_input, training=False, return_attention=True)
     model.save(FLAGS.model_name)
+    print('did saving')
+    pass
 
 
 if __name__ == "__main__":
@@ -73,7 +75,7 @@ if __name__ == "__main__":
         help="path/to/fname.pkl for where we should load the expansion object",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="training batch size"
+        "--batch_size", type=int, default=128, help="training batch size"
     )
     parser.add_argument(
         "--train_p", type=float, default=1.0, help="number in [0,1] for train-val split"

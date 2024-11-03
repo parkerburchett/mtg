@@ -72,7 +72,7 @@ class DraftBot(tf.Module):
         self.t = expansion.t
         # the first five elements will be card data on basics, which is irrelevant
         #     for drafting, so we get rid of them
-        self.card_data = expansion.card_data_for_ML[5:]
+        self.card_data = expansion.card_data_for_ML # [5:] # don't ignore the first 5 because they are valid
         self.emb_dim = tf.Variable(emb_dim, dtype=tf.float32, trainable=False, name="emb_dim")
         self.dropout = emb_dropout
         # positional embedding allows deviation given temporal context
@@ -98,6 +98,7 @@ class DraftBot(tf.Module):
         #     2. use an MLP on the data about each card (self.card_data) to yield an
         #        emb_dim//2 dimension embedding
         #     3. The embedding we use for cards is the concatenation of 1. and 2.
+        print('adsfasdf')
         self.card_embedding = nn.ConcatEmbedding(
             self.n_cards + 1,
             emb_dim,
@@ -130,6 +131,9 @@ class DraftBot(tf.Module):
             out_act=None,
             style="reverse_bottleneck",
         )
+
+        print('DraftBot init worked')
+        pass
 
     @tf.function
     def __call__(
@@ -271,7 +275,7 @@ class DraftBot(tf.Module):
             if isinstance(learning_rate, dict):
                 learning_rate = CustomSchedule(self.emb_dim, **learning_rate)
             else:
-                learning_rate = learning_rate
+                learning_rate = float(learning_rate)
 
             self.optimizer = tf.keras.optimizers.Adam(
                 learning_rate=learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9

@@ -25,7 +25,7 @@ class Trainer:
         self.target = target
         self.model = model
         self.epoch_n = 0
-        self.clip = clip
+        self.clip = float(clip)
         self.loss_agg_f = loss_agg_f
         if self.target is not None:
             self.batch_ids = np.arange(len(self.target))
@@ -82,6 +82,7 @@ class Trainer:
         print_keys=[],
         only_val_metrics=False,
     ):
+        print('in trainer.train')
         n_batches = (
             len(self.batch_ids) // batch_size
             if self.generator is None
@@ -99,6 +100,7 @@ class Trainer:
                 extra_metric_keys += [
                     "val_" + metric_key for metric_key in extra_metric_keys
                 ]
+        print('before loop')
         for _ in range(n_epochs):
             self.epoch_n += 1
             if self.batch_ids is not None:

@@ -78,7 +78,7 @@ class ConcatEmbedding(tf.Module):
         out_act=None,
     ):
         super().__init__(name=name)
-        assert item_data.shape[0] == num_items
+        assert item_data.shape[0] == num_items # issue here
         self.item_data = item_data
         self.item_MLP = MLP(
             in_dim=item_data.shape[1],

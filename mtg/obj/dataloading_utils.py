@@ -32,7 +32,7 @@ def sort_cols_by_card_idxs(df, card_col_prefixes, cards):
 
 def load_bo1_data(filename, cards):
     COLUMN_REGEXES = {
-        re.compile(r"user_game_win_rate_bucket"): "float16",
+        re.compile(r"user_game_win_rate_bucket"): "float32",
         re.compile(r"rank"): "str",
         re.compile(r"draft_id"): "str",
         re.compile(r"draft_time"): "str",
@@ -97,7 +97,7 @@ def load_bo1_data(filename, cards):
 
 def load_draft_data(filename, cards):
     COLUMN_REGEXES = {
-        re.compile(r"user_game_win_rate_bucket"): "float16",
+        re.compile(r"user_game_win_rate_bucket"): "float32",
         re.compile(r"user_n_games_bucket"): "int8",
         re.compile(r"rank"): "str",
         re.compile(r"draft_id"): "str",
@@ -109,8 +109,8 @@ def load_draft_data(filename, cards):
         re.compile(r"pack_number"): "int8",
         re.compile(r"pick_number"): "int8",
         re.compile(r"pick$"): "str",
-        re.compile(r"pick_maindeck_rate"): "float16",
-        re.compile(r"pick_sideboard_in_rate"): "float16",
+        re.compile(r"pick_maindeck_rate"): "float32",
+        re.compile(r"pick_sideboard_in_rate"): "float32",
         re.compile(r"pool_.*"): "int8",
         re.compile(r"pack_card_.*"): "int8",
     }

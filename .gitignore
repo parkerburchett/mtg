@@ -136,3 +136,5 @@ data/
 
 # Mac files
 .DS_Store
+expansion.pkl
+snc_card_df.parquet
