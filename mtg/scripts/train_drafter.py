@@ -5,9 +5,16 @@ from mtg.obj.expansion import SNC
 import pickle
 from mtg.ml.trainer import Trainer
 import tensorflow as tf
+import pandas as pd
+
+
+# tf.debugging.set_log_device_placement(True)
 
 
 def main():
+    
+    
+    
     with open(FLAGS.expansion_fname, "rb") as f:
         expansion = pickle.load(f)
 
@@ -34,6 +41,7 @@ def main():
         memory_dropout=FLAGS.transformer_dropout,
         name="DraftBot",
     )
+    pass
     model.compile(
         # learning_rate={"warmup_steps": FLAGS.lr_warmup},
         margin=FLAGS.emb_margin,
@@ -41,7 +49,6 @@ def main():
         rare_lambda=FLAGS.rare_lambda,
         cmc_lambda=FLAGS.cmc_lambda,
     )
-
     trainer = Trainer(
         model,
         generator=train_gen,
@@ -50,6 +57,19 @@ def main():
     print('got to trainer')
     trainer.train(FLAGS.epochs, print_keys=["prediction_loss", "embedding_loss", "rare_loss", "cmc_loss"],verbose=FLAGS.verbose)
 
+    metric_records_df = pd.DataFrame.from_records(trainer.metric_records)
+    validation_metric_records_df = pd.DataFrame.from_records(trainer.validation_metric_records)
+    metric_records_df.to_csv("metric_records_df.csv")
+    validation_metric_records_df.to_csv("validation_metric_records_df.csv")
+    
+    
+    print('in sample')
+    print(metric_records_df.head())
+    print(metric_records_df.tail())
+    
+    print('out of sample')
+    print(validation_metric_records_df.head())
+    print(validation_metric_records_df.tail())
     print('did training')
     # we run inference once before saving the model in order to serialize it with the right input parameters for inference
     # and we do it with train_gen because val_gen can be None, and this isn't used for validation but serialization
@@ -75,10 +95,10 @@ if __name__ == "__main__":
         help="path/to/fname.pkl for where we should load the expansion object",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=128, help="training batch size"
+        "--batch_size", type=int, default=32 * 1, help="training batch size"
     )
     parser.add_argument(
-        "--train_p", type=float, default=1.0, help="number in [0,1] for train-val split"
+        "--train_p", type=float, default=.9, help="number in [0,1] for train-val split"
     )
     parser.add_argument(
         "--emb_dim", type=int, default=128, help="card embedding dimension"
@@ -98,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pointwise_ffn_width",
         type=int,
-        default=512,
+        default=512, # 512 # (at 256, its 4batch / second)
         help="each transformer block has a pointwise_ffn with this width as latent space",
     )
     parser.add_argument(
@@ -156,7 +176,7 @@ if __name__ == "__main__":
         help="regularization coefficient for penalizing the model for taking expensive cards when human doesn't",
     )
     parser.add_argument(
-        "--epochs", type=int, default=1, help="number of epochs to train the model"
+        "--epochs", type=int, default=2, help="number of epochs to train the model"
     )
     parser.add_argument(
         "--verbose",

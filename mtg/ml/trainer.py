@@ -1,5 +1,4 @@
 import tensorflow as tf
-import sys
 from tqdm.auto import tqdm
 import numpy as np
 
@@ -49,6 +48,10 @@ class Trainer:
             assert self.val_features is None
             assert self.val_target is None
             assert self.val_weights is None
+        
+        self.loss_records = []
+        self.metric_records = []
+        self.validation_metric_records = []
 
     def _step(
         self, batch_features, batch_target, batch_weights, only_val_metrics=False
@@ -72,6 +75,10 @@ class Trainer:
         if self.clip:
             grads, _ = tf.clip_by_global_norm(grads, self.clip)
         self.model.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        clean_metrics = {}
+        for k, v in metrics.items():
+            clean_metrics[k] = float(v.numpy())
+        self.metric_records.append(clean_metrics)
         return loss, metrics
 
     def train(
@@ -82,7 +89,6 @@ class Trainer:
         print_keys=[],
         only_val_metrics=False,
     ):
-        print('in trainer.train')
         n_batches = (
             len(self.batch_ids) // batch_size
             if self.generator is None
@@ -100,7 +106,6 @@ class Trainer:
                 extra_metric_keys += [
                     "val_" + metric_key for metric_key in extra_metric_keys
                 ]
-        print('before loop')
         for _ in range(n_epochs):
             self.epoch_n += 1
             if self.batch_ids is not None:
@@ -160,6 +165,10 @@ class Trainer:
                             sample_weight=val_weights,
                             training=False,
                         )
+                        clean_valid_metrics = {}
+                        for k, v in clean_valid_metrics.items():
+                            clean_valid_metrics[k] = float(v.numpy())
+                        self.validation_metric_records.append(clean_valid_metrics)
                     else:
                         val_metrics = dict()
                     for m_key, m_val in val_metrics.items():

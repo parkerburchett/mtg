@@ -98,7 +98,6 @@ class DraftBot(tf.Module):
         #     2. use an MLP on the data about each card (self.card_data) to yield an
         #        emb_dim//2 dimension embedding
         #     3. The embedding we use for cards is the concatenation of 1. and 2.
-        print('adsfasdf')
         self.card_embedding = nn.ConcatEmbedding(
             self.n_cards + 1,
             emb_dim,
@@ -132,8 +131,6 @@ class DraftBot(tf.Module):
             style="reverse_bottleneck",
         )
 
-        print('DraftBot init worked')
-        pass
 
     @tf.function
     def __call__(
