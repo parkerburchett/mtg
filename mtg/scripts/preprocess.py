@@ -8,21 +8,26 @@ def main():
     expansion = EXPANSION(bo1=FLAGS.game_data, draft=FLAGS.draft_data, ml_data=True)
     with open(FLAGS.expansion_fname, "wb") as f:
         pickle.dump(expansion, f)
-
+    
+    with open(FLAGS.expansion_fname, "rb") as f:
+        expansion = pickle.load(f)
+    print(type(expansion))
+    print(f'{len(expansion.cards)=} {len(expansion.card_data_for_ML)=} {expansion.t=} ')
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--expansion",
         type=str,
-        default="VOW",
+        default="SNC",
         help="name of magic expansion corresponding to data files",
     )
     parser.add_argument(
-        "--game_data", type=str, default=None, help="path to bo1 game data"
+        "--game_data", type=str, default='../mtg/data/game_data_public.SNC.PremierDraft.csv', help="path to bo1 game data"
     )
     parser.add_argument(
-        "--draft_data", type=str, default=None, help="path to bo1 draft data"
+        "--draft_data", type=str, default="../mtg/data/draft_data_public.SNC.PremierDraft.csv", help="path to bo1 draft data"
     )
     parser.add_argument(
         "--expansion_fname",

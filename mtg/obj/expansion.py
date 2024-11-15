@@ -159,13 +159,18 @@ class Expansion:
             "UBRG",
             "WUBRG",
         ]
-        card_df = pd.DataFrame()
+        card_dfs = []
+        valid_card_names = self.cards['name'].values
         for colors in all_colors:
             time.sleep(1)
             card_data_df = get_card_rating_data(self.expansion, colors=colors)
+            # only include valid card names, eg exclude the card names with prefix a- in SNC returned from 17 lands for some reason
+            card_data_df = card_data_df[card_data_df.index.isin(valid_card_names).copy()]
             extension = "" if colors is None else "_" + colors
             card_data_df.columns = [col + extension for col in card_data_df.columns]
-            card_df = pd.concat([card_df, card_data_df], axis=1).fillna(0.0)
+            card_dfs.append(card_data_df)
+            
+        card_df = pd.concat(card_dfs, axis=1).fillna(0.0)
         return card_df
 
     def get_bo1_decks(self):
@@ -449,3 +454,5 @@ def get_expansion_obj_from_name(expansion):
         if exp.__name__.lower() == expansion.lower():
             return exp
     raise ValueError(f"{expansion} does not have a corresponding Expansion object.")
+
+

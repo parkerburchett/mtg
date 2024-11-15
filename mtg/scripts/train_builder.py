@@ -38,9 +38,9 @@ def main():
     )
 
     model.compile(
-        learning_rate={"warmup_steps": FLAGS.lr_warmup},
+        # learning_rate={"warmup_steps": FLAGS.lr_warmup},
         cmc_lambda=FLAGS.cmc_lambda,
-        card_data=expansion.card_data_for_ML.iloc[:-1, :],
+        card_data=expansion.card_data_for_ML.iloc[:-1, :], # not sure why it skips here
     )
     trainer = Trainer(
         model,
@@ -59,6 +59,8 @@ def main():
     basics, spells, n_basics = build_decks(model, pool, cards=expansion.cards)
 
     model.save(expansion.cards, FLAGS.model_name)
+    # | 4073/4073 [12:26<00:00,  5.46Batch/s, basics_off=2.87, loss=14, spells_off=8.41]
+    pass
 
 
 if __name__ == "__main__":
@@ -84,7 +86,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--draft_model",
         type=str,
-        default=None,
+        default='draft_model/',
         help="path/to/model so we can use embeddings learned from an existing pretrained draft model",
     )
     parser.add_argument(
@@ -118,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name",
         type=str,
-        default="draft_model",
+        default="deck_model/",
         help="path/to/deck_model where the model will be stored",
     )
 

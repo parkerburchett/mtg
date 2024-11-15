@@ -456,7 +456,7 @@ class DeckBuilder(tf.Module):
         self.n_cards = n_cards
         if isinstance(embeddings, int):
             emb_trainable = True
-            initializer = tf.initializers.glorot_normal()
+            initializer = tf.initializers.glorot_normal(42)
             emb_init = initializer(shape=(self.n_cards, embeddings))
         else:
             emb_trainable = False

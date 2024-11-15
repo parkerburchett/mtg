@@ -136,3 +136,6 @@ data/
 
 # Mac files
 .DS_Store
+expansion.pkl
+draft_model/
+deck_model/

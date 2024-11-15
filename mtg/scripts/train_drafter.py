@@ -34,7 +34,7 @@ def main():
     )
 
     model.compile(
-        learning_rate={"warmup_steps": FLAGS.lr_warmup},
+        # learning_rate={"warmup_steps": FLAGS.lr_warmup},
         margin=FLAGS.emb_margin,
         emb_lambda=FLAGS.emb_lambda,
         rare_lambda=FLAGS.rare_lambda,
@@ -62,6 +62,10 @@ def main():
     )
     output, attention = model(model_input, training=False, return_attention=True)
     model.save(FLAGS.model_name)
+    # at 9% done top1=0.438, top2=0.653, top3=0.781
+    # at done  top1=0.451, top2=0.665, top3=0.791
+    # need a frame of reference for this
+    # to get an intution for the max capacity of this model
 
 
 if __name__ == "__main__":
