@@ -12,7 +12,8 @@ def main():
     with open(FLAGS.expansion_fname, "rb") as f:
         expansion = pickle.load(f)
     print(type(expansion))
-    print(f'{len(expansion.cards)=} {len(expansion.card_data_for_ML)=} {expansion.t=} ')
+    print(f'{len(expansion.cards)=} {len(expansion.card_data_for_ML)=}')
+    pass
     
 
 if __name__ == "__main__":

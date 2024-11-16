@@ -111,6 +111,8 @@ class Expansion:
         count_cols = [x for x in ml_data.columns if "_count" in x]
         # 0-1 normalize data representing counts
         ml_data[count_cols] = ml_data[count_cols].apply(lambda x: x / x.max(), axis=0)
+        # make sure the ml_data and a cards DataFrames are in the same order
+        ml_data = ml_data.reindex(cards.index)
         ml_data["idx"] = cards["idx"]
         # the way our embeddings work is we always have an embedding that represents the lack of a card. This helps the model
         # represent stuff like generic format information. Hence we make this a one-hot vector that gets used in Draft when
@@ -163,14 +165,13 @@ class Expansion:
         valid_card_names = self.cards['name'].values
         for colors in all_colors:
             time.sleep(1)
-            card_data_df = get_card_rating_data(self.expansion, colors=colors)
-            # only include valid card names, eg exclude the card names with prefix a- in SNC returned from 17 lands for some reason
-            card_data_df = card_data_df[card_data_df.index.isin(valid_card_names).copy()]
+            card_data_df = get_card_rating_data(self.expansion, valid_card_names, colors=colors)
             extension = "" if colors is None else "_" + colors
             card_data_df.columns = [col + extension for col in card_data_df.columns]
             card_dfs.append(card_data_df)
             
         card_df = pd.concat(card_dfs, axis=1).fillna(0.0)
+
         return card_df
 
     def get_bo1_decks(self):

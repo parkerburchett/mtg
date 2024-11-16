@@ -130,12 +130,13 @@ dmypy.json
 
 # Don't upload data
 data/
+expansion.pkl
+draft_model/
+deck_model/
+.env
 
 # Don't upload vscode specs
 .vscode
 
 # Mac files
 .DS_Store
-expansion.pkl
-draft_model/
-deck_model/

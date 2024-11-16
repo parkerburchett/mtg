@@ -6,3 +6,4 @@ jupyter
 matplotlib
 tensorflow
 tqdm
+python-dotenv
