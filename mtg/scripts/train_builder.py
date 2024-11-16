@@ -38,7 +38,7 @@ def main():
     )
 
     model.compile(
-        # learning_rate={"warmup_steps": FLAGS.lr_warmup},
+        learning_rate={"warmup_steps": FLAGS.lr_warmup},
         cmc_lambda=FLAGS.cmc_lambda,
         card_data=expansion.card_data_for_ML.iloc[:-1, :], # not sure why it skips here
     )
@@ -59,8 +59,6 @@ def main():
     basics, spells, n_basics = build_decks(model, pool, cards=expansion.cards)
 
     model.save(expansion.cards, FLAGS.model_name)
-    # | 4073/4073 [12:26<00:00,  5.46Batch/s, basics_off=2.87, loss=14, spells_off=8.41]
-    pass
 
 
 if __name__ == "__main__":
@@ -75,7 +73,7 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=32, help="training batch size"
     )
     parser.add_argument(
-        "--train_p", type=float, default=1.0, help="number in [0,1] for train-val split"
+        "--train_p", type=float, default=.9, help="number in [0,1] for train-val split"
     )
     parser.add_argument(
         "--emb_dim",
