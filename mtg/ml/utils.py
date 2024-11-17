@@ -76,3 +76,44 @@ def load_model(location, extra_pickle="attrs.pkl"):
         return (model, extra)
     except:
         return model
+
+
+def compute_top_k_accuracy(true, preds, sample_weights=None, k=1):
+    """
+    Computes the top-K accuracy given true labels, predictions, and optional sample weights.
+
+    Args:
+        true (tf.Tensor): Tensor of true labels with shape (batch_size,) or (batch_size, sequence_length).
+        preds (tf.Tensor): Tensor of predicted probabilities or logits with shape (batch_size, num_classes) or (batch_size, sequence_length, num_classes).
+        sample_weights (tf.Tensor, optional): Tensor of sample weights with the same shape as true labels. Defaults to None.
+        k (int, optional): The number of top predictions to consider for accuracy. Defaults to 1.
+
+    Returns:
+        float: The percentage accuracy computed over the provided samples.
+    """
+    import tensorflow as tf
+
+    # Flatten tensors to combine batch and sequence dimensions
+    true_flat = tf.reshape(true, [-1])
+    preds_flat = tf.reshape(preds, [-1, tf.shape(preds)[-1]])
+
+    # Compute sparse top-k categorical accuracy
+    accuracy = tf.keras.metrics.sparse_top_k_categorical_accuracy(true_flat, preds_flat, k=k)
+
+    # Apply sample weights if provided
+    if sample_weights is not None:
+        sample_weights_flat = tf.reshape(sample_weights, [-1])
+        sample_weights_flat = tf.cast(sample_weights_flat, dtype=tf.float32)
+        accuracy = accuracy * sample_weights_flat
+
+        # Compute weighted mean accuracy
+        total_weight = tf.reduce_sum(sample_weights_flat)
+        accuracy = tf.reduce_sum(accuracy) / total_weight
+    else:
+        # Compute mean accuracy
+        accuracy = tf.reduce_mean(accuracy)
+
+    # Convert accuracy to percentage
+    accuracy_percentage = accuracy.numpy() * 100.0
+
+    return accuracy_percentage

@@ -6,8 +6,16 @@ import numpy as np
 import tensorflow as tf
 from mtg.ml import nn
 from mtg.ml.layers import Embedding
-from mtg.ml.utils import CustomSchedule
+from mtg.ml.utils import CustomSchedule, compute_top_k_accuracy
+ 
 
+class MyTensorClass:
+    def __init__(self, tensor):
+        self.tensor = tensor
+        self.view = self.tensor.cpu().numpy()
+
+    def __repr__(self):
+        return self.view
 
 class DraftBot(tf.Module):
     """
@@ -131,6 +139,117 @@ class DraftBot(tf.Module):
             style="reverse_bottleneck",
         )
 
+    def loud_call(
+        self,
+        features,
+        training=None,
+        return_attention=False,
+    ):
+        packs, picks, positions = features
+        
+        # Wrap tensors for inspection
+        packs_you_can_see = MyTensorClass(packs)
+        picks_you_can_see = MyTensorClass(picks)
+        positions_you_can_see = MyTensorClass(positions)
+
+        # Store last data batch in case specific batch of data causes an issue
+        self.last_packs = packs
+        self.last_picks = picks
+        self.last_positions = positions
+
+        # Get the positional mask, which is a lookahead mask for autoregressive predictions.
+        positional_masks = tf.gather(self.positional_mask, positions)
+        positional_masks_you_can_see = MyTensorClass(positional_masks)
+
+        # Positional embeddings to differentiate context at different time steps
+        self.positional_embeddings = self.positional_embedding(positions, training=training)
+        positional_embeddings_you_can_see = MyTensorClass(self.positional_embeddings)
+
+        self.all_card_embeddings = self.card_embedding(tf.range(self.n_cards), training=training)
+        all_card_embeddings_you_can_see = MyTensorClass(self.all_card_embeddings)
+
+        # Represent packs as embeddings
+        self.pack_card_embeddings = packs[:, :, :, None] * self.all_card_embeddings[None, None, :, :]
+        pack_card_embeddings_you_can_see = MyTensorClass(self.pack_card_embeddings)
+
+        # Get the number of cards in each pack
+        self.n_options = tf.reduce_sum(packs, axis=-1, keepdims=True)
+        n_options_you_can_see = MyTensorClass(self.n_options)
+
+        # The pack_embedding is the average of the embeddings of the cards in the pack
+        self.pack_embeddings = tf.reduce_sum(self.pack_card_embeddings, axis=2) / self.n_options
+        pack_embeddings_you_can_see = MyTensorClass(self.pack_embeddings)
+
+        # Add the positional information to the card embeddings
+        self.embs = self.pack_embeddings * tf.math.sqrt(self.emb_dim) + self.positional_embeddings
+        embs_you_can_see = MyTensorClass(self.embs)
+
+        if training and self.dropout > 0.0:
+            self.embs = tf.nn.dropout(self.embs, rate=self.dropout)
+            embs_after_dropout_you_can_see = MyTensorClass(self.embs)
+
+        # Transformer encoder on the pack information
+        self.encoder_holder = []
+        for memory_layer in self.encoder_layers:
+            self.embs, attention_weights_pack = memory_layer(
+                self.embs, positional_masks, training=training
+            )  # (batch_size, t, emb_dim)
+            embs_after_encoder_you_can_see = MyTensorClass(self.embs)
+            attention_weights_pack_you_can_see = MyTensorClass(attention_weights_pack)
+            self.encoder_holder.append((self.embs, attention_weights_pack))
+
+        # Transformer decoder on the pick information
+        self.dec_embs = self.card_embedding(picks, training=training)
+        dec_embs_you_can_see = MyTensorClass(self.dec_embs)
+
+        if training and self.dropout > 0.0:
+            self.dec_embs = tf.nn.dropout(self.dec_embs, rate=self.dropout)
+            dec_embs_after_dropout_you_can_see = MyTensorClass(self.dec_embs)
+
+        self.decoder_holder = []
+        for memory_layer in self.decoder_layers:
+            self.dec_embs, attention_weights_pick = memory_layer(
+                self.dec_embs,
+                positional_masks,
+                encoder_output=self.embs,
+                training=training,
+            )  # (batch_size, t, emb_dim)
+            dec_embs_after_decoder_you_can_see = MyTensorClass(self.dec_embs)
+            attention_weights_pick_you_can_see = MyTensorClass(attention_weights_pick)
+            self.decoder_holder.append((self.dec_embs, attention_weights_pick))
+
+        # Mask to remove cards not in the pack as options
+        self.mask_for_softmax = 1e9 * (1 - packs)
+        mask_for_softmax_you_can_see = MyTensorClass(self.mask_for_softmax)
+
+        # Compute card rankings
+        self.card_rankings = (
+            self.output_decoder(self.dec_embs, training=training) * packs - self.mask_for_softmax
+        )  # (batch_size, t, n_cards)
+        card_rankings_you_can_see = MyTensorClass(self.card_rankings)
+
+        # Compute Euclidean distances for regularization
+        self.emb_dists = (
+            tf.sqrt(
+                tf.reduce_sum(
+                    tf.square(self.pack_card_embeddings - self.dec_embs[:, :, None, :]),
+                    axis=-1,
+                )
+            )
+            * packs
+            + self.mask_for_softmax
+        )
+        emb_dists_you_can_see = MyTensorClass(self.emb_dists)
+
+        # Compute output probabilities
+        self.output = tf.nn.softmax(self.card_rankings)
+        output_you_can_see = MyTensorClass(self.output)
+
+        if return_attention:
+            return self.output, (attention_weights_pack, attention_weights_pick)
+        return self.output, self.emb_dists
+
+    
     @tf.function
     def __call__(
         self,
@@ -243,7 +362,7 @@ class DraftBot(tf.Module):
         rare_lambda=10.0,
         cmc_lambda=1.0,
         cmc_margin=1.0,
-        metric_names=["top1", "top2", "top3"],
+        metric_names=["top1", "top2", "top3", "first_picks_top_1", "first_picks_top_2", "first_picks_top_3"],
     ):
         """
         After initializing the model, we want to compile it by setting parameters for training
@@ -355,20 +474,65 @@ class DraftBot(tf.Module):
         rare_loss = (1 - human_took_rare) * pred_rare_val * self.rare_lambda
         self.rare_loss = tf.reduce_sum(rare_loss * sample_weight)
         return self.cmc_loss + self.rare_loss
-
-    def compute_metrics(self, true, pred, sample_weight=None, **kwargs):
+    
+    def compute_metrics(self, true, pred, sample_weight=None,  **kwargs):
         """
-        compute top1, top2, top3 accuracy to display as metrics during training when verbose=True
+        Compute top1, top2, top3 accuracy to display as metrics during training when verbose=True.
+        Includes metrics for the 0th, 14th, and 28th picks.
         """
         if sample_weight is None:
-            sample_weight = tf.ones_like(true.shape) / (true.shape[0] * true.shape[1])
-        # TODO: this caused a shape error, but didn't previously. Look into in detail later, comment out for now.
-        # sample_weight = sample_weight.flatten()
-        pred, _ = pred
-        top1 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 1) * sample_weight)
-        top2 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 2) * sample_weight)
-        top3 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 3) * sample_weight)
-        return {"top1": top1, "top2": top2, "top3": top3}
+            sample_weight = tf.ones_like(true, dtype=tf.float32) / tf.cast(tf.size(true), tf.float32)
+        # Note: tf.ones_like(true.shape) was incorrect; changed to tf.ones_like(true)
+        
+        pred, _ = pred  # Unpack predictions
+
+        # Overall top-k accuracies
+        top1 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, k=1) * sample_weight)
+        top2 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, k=2) * sample_weight)
+        top3 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, k=3) * sample_weight)
+        
+        # Wrap tensors with MyTensorClass for inspection (if needed)
+        pred_local = MyTensorClass(pred)
+        true_local = MyTensorClass(true)
+        
+        # Indices for first picks
+        first_picks_indices = [0, 14, 28]
+
+        # Gather true labels and predictions at specified indices
+        first_pick_true = tf.gather(true, indices=first_picks_indices, axis=1)
+        first_pick_pred = tf.gather(pred, indices=first_picks_indices, axis=1)
+        first_pick_sample_weights = None
+        if sample_weight is not None:
+            first_pick_sample_weights = tf.gather(sample_weight, indices=first_picks_indices, axis=1)
+
+        # Compute top-K accuracies for first picks
+        first_picks_top_1 = compute_top_k_accuracy(first_pick_true, first_pick_pred, sample_weights=first_pick_sample_weights, k=1)
+        first_picks_top_2 = compute_top_k_accuracy(first_pick_true, first_pick_pred, sample_weights=first_pick_sample_weights, k=2)
+        first_picks_top_3 = compute_top_k_accuracy(first_pick_true, first_pick_pred, sample_weights=first_pick_sample_weights, k=3)
+
+        return {
+                "top1": top1, 
+                "top2": top2,
+                "top3": top3, 
+                'first_picks_top_1': first_picks_top_1, 
+                'first_picks_top_2': first_picks_top_2,
+                'first_picks_top_3': first_picks_top_3,
+            }
+            
+    # def compute_metrics(self, true, pred, sample_weight=None, **kwargs):
+    #     """
+    #     compute top1, top2, top3 accuracy to display as metrics during training when verbose=True
+    #     """
+    #     if sample_weight is None:
+    #         sample_weight = tf.ones_like(true.shape) / (true.shape[0] * true.shape[1])
+    #     # TODO: this caused a shape error, but didn't previously. Look into in detail later, comment out for now.
+    #     # sample_weight = sample_weight.flatten()
+    #     pred, _ = pred
+    #     top1 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 1) * sample_weight)
+    #     top2 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 2) * sample_weight)
+    #     top3 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 3) * sample_weight)
+        
+    #     return {"top1": top1, "top2": top2, "top3": top3}
 
     def save(self, location):
         """
