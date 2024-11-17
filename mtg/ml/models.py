@@ -715,7 +715,7 @@ class DeckBuilder(tf.Module):
         built_lambda=1.0,
         cmc_lambda=0.01,
         optimizer=None,
-        metric_names=["basics_off", "spells_off"],
+        metric_names=["basics_off", "spells_off", "mean_jaccard_similarity"],
     ):
         """
         After initializing the model, we want to compile it by setting parameters for training
@@ -802,7 +802,9 @@ class DeckBuilder(tf.Module):
         basic_diff = tf.reduce_sum(tf.reduce_sum(tf.math.abs(pred_basics - true_basics), axis=-1) * sample_weight)
         # compute the average number of non-basics and spells off the model is from human builds
         deck_diff = tf.reduce_sum(tf.reduce_sum(tf.math.abs(pred_built - true_decks), axis=-1) * sample_weight)
-        return {"basics_off": basic_diff, "spells_off": deck_diff}
+        mean_jaccard_similarity = self.compute_jaccard_similarity(true_decks, pred_built, X = 23) # avg of 23 spells and 17 lands, close enough
+
+        return {"basics_off": basic_diff, "spells_off": deck_diff, "mean_jaccard_similarity":mean_jaccard_similarity}
 
     def save(self, cards, location):
         """
@@ -814,3 +816,62 @@ class DeckBuilder(tf.Module):
         tf.saved_model.save(self, model_loc)
         with open(data_loc, "wb") as f:
             pickle.dump(cards, f)
+            
+    def compute_jaccard_similarity(self, true_decks, pred_decks, X=23):
+        """
+        Computes the average Jaccard similarity between the top X cards of the predicted and true decks.
+
+        Args:
+            true_decks (tf.Tensor): Tensor of shape (batch_size, deck_size, num_cards) representing the true decks.
+            pred_decks (tf.Tensor): Tensor of shape (batch_size, deck_size, num_cards) representing the predicted decks.
+            X (int): The number of top cards to consider for computing the Jaccard similarity.
+
+        Returns:
+            tf.Tensor: The average Jaccard similarity over the batch.
+        """
+        with tf.device('/CPU:0'):
+            batch_size = tf.shape(true_decks)[0]
+            num_cards = tf.shape(true_decks)[2]
+
+            # Sum over deck_size dimension to get counts per card
+            true_counts = tf.reduce_sum(true_decks, axis=1)  # shape: (batch_size, num_cards)
+            pred_counts = tf.reduce_sum(pred_decks, axis=1)  # shape: (batch_size, num_cards)
+
+            # Get the indices of the top X cards for true and predicted counts
+            true_top_indices = tf.math.top_k(true_counts, k=X).indices  # shape: (batch_size, X)
+            pred_top_indices = tf.math.top_k(pred_counts, k=X).indices  # shape: (batch_size, X)
+
+            # Create boolean masks of shape (batch_size, num_cards)
+            # Initialize masks with zeros
+            true_top_mask = tf.zeros([batch_size, num_cards], dtype=tf.bool)
+            pred_top_mask = tf.zeros([batch_size, num_cards], dtype=tf.bool)
+
+            # Prepare indices for scatter_nd
+            batch_indices = tf.repeat(tf.range(batch_size), repeats=X)  # shape: (batch_size * X,)
+
+            # For true_top_indices
+            true_indices_flat = tf.reshape(true_top_indices, [-1])  # shape: (batch_size * X,)
+            true_indices = tf.stack([batch_indices, true_indices_flat], axis=1)  # shape: (batch_size * X, 2)
+            true_top_mask = tf.tensor_scatter_nd_update(true_top_mask, true_indices, tf.ones([batch_size * X], dtype=tf.bool))
+
+            # For pred_top_indices
+            pred_indices_flat = tf.reshape(pred_top_indices, [-1])  # shape: (batch_size * X,)
+            pred_indices = tf.stack([batch_indices, pred_indices_flat], axis=1)  # shape: (batch_size * X, 2)
+            pred_top_mask = tf.tensor_scatter_nd_update(pred_top_mask, pred_indices, tf.ones([batch_size * X], dtype=tf.bool))
+
+            # Compute intersection and union
+            intersection = tf.logical_and(true_top_mask, pred_top_mask)  # shape: (batch_size, num_cards)
+            union = tf.logical_or(true_top_mask, pred_top_mask)          # shape: (batch_size, num_cards)
+
+            # Compute sizes
+            intersection_sizes = tf.reduce_sum(tf.cast(intersection, tf.float32), axis=-1)  # shape: (batch_size,)
+            union_sizes = tf.reduce_sum(tf.cast(union, tf.float32), axis=-1)  # shape: (batch_size,)
+
+            # Compute Jaccard similarity
+            epsilon = 1e-7  # Small constant to avoid division by zero
+            jaccard_similarities = intersection_sizes / (union_sizes + epsilon)  # shape: (batch_size,)
+
+            # Compute average Jaccard similarity over the batch
+            mean_jaccard_similarity = tf.reduce_mean(jaccard_similarities)
+
+        return mean_jaccard_similarity

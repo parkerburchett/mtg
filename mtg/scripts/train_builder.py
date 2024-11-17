@@ -73,7 +73,7 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=32, help="training batch size"
     )
     parser.add_argument(
-        "--train_p", type=float, default=.9, help="number in [0,1] for train-val split"
+        "--train_p", type=float, default=1, help="number in [0,1] for train-val split"
     )
     parser.add_argument(
         "--emb_dim",
