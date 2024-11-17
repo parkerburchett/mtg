@@ -2,6 +2,7 @@ import tensorflow as tf
 import sys
 from tqdm.auto import tqdm
 import numpy as np
+import pandas as pd
 
 
 class Trainer:
@@ -72,6 +73,10 @@ class Trainer:
         if self.clip:
             grads, _ = tf.clip_by_global_norm(grads, self.clip)
         self.model.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        metrics['loss'] = loss
+        
+        for k, v in metrics.items():
+            metrics[k] = float(v.cpu().numpy())
         return loss, metrics
 
     def train(
@@ -199,3 +204,48 @@ class Trainer:
                 self.generator.on_epoch_end()
             if self.val_generator is not None:
                 self.val_generator.on_epoch_end()
+        
+        
+    def train_happy_path( self,n_epochs:int):
+        if self.generator is None:
+            raise ValueError('expected a generator')
+        if self.val_generator is not None:
+            raise ValueError('expected no val_generator')
+        
+        n_batches = len(self.generator)
+        progress = tqdm(total=n_batches, desc=f"Epoch {self.epoch_n}/{self.epoch_n + n_epochs}", unit="Batch")
+        metric_records = {}
+
+        for epoch in range(n_epochs):
+            self.epoch_n += 1
+            
+            for i in range(n_batches):
+
+                batch_features, batch_target, batch_weights = self.generator[i]
+                loss, metrics = self._step(
+                    batch_features,
+                    batch_target,
+                    batch_weights,
+                )
+                metrics['batch'] = i
+                metrics['epoch'] = epoch
+                                
+                for k, v in metrics.items():
+                    try:
+                        metric_records[k].append(v)
+                    except KeyError:
+                        metric_records[k] = [v]
+                
+                # display avg metric value of the previous 20 batches, 
+                if len(metric_records[k]) > 20:
+                    if i % 20 == 0:
+                        avg_metrics = {k:np.mean(v[-20:]) for k, v in metric_records.items() if k not in ['batch', 'epoch']}
+                        progress.set_postfix(**avg_metrics)
+                progress.update(1)
+            
+            self.generator.on_epoch_end()
+            df = pd.DataFrame.from_records(metric_records)
+            df.to_csv(f'{self.model.name} metric_records.csv')
+                
+
+

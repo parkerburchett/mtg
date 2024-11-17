@@ -9,13 +9,14 @@ from mtg.ml.layers import Embedding
 from mtg.ml.utils import CustomSchedule, compute_top_k_accuracy
  
 
-class MyTensorClass:
+class ViewableTensor:
     def __init__(self, tensor):
         self.tensor = tensor
         self.view = self.tensor.cpu().numpy()
 
     def __repr__(self):
         return self.view
+
 
 class DraftBot(tf.Module):
     """
@@ -148,9 +149,9 @@ class DraftBot(tf.Module):
         packs, picks, positions = features
         
         # Wrap tensors for inspection
-        packs_you_can_see = MyTensorClass(packs)
-        picks_you_can_see = MyTensorClass(picks)
-        positions_you_can_see = MyTensorClass(positions)
+        packs_you_can_see = ViewableTensor(packs)
+        picks_you_can_see = ViewableTensor(picks)
+        positions_you_can_see = ViewableTensor(positions)
 
         # Store last data batch in case specific batch of data causes an issue
         self.last_packs = packs
@@ -159,34 +160,34 @@ class DraftBot(tf.Module):
 
         # Get the positional mask, which is a lookahead mask for autoregressive predictions.
         positional_masks = tf.gather(self.positional_mask, positions)
-        positional_masks_you_can_see = MyTensorClass(positional_masks)
+        positional_masks_you_can_see = ViewableTensor(positional_masks)
 
         # Positional embeddings to differentiate context at different time steps
         self.positional_embeddings = self.positional_embedding(positions, training=training)
-        positional_embeddings_you_can_see = MyTensorClass(self.positional_embeddings)
+        positional_embeddings_you_can_see = ViewableTensor(self.positional_embeddings)
 
         self.all_card_embeddings = self.card_embedding(tf.range(self.n_cards), training=training)
-        all_card_embeddings_you_can_see = MyTensorClass(self.all_card_embeddings)
+        all_card_embeddings_you_can_see = ViewableTensor(self.all_card_embeddings)
 
         # Represent packs as embeddings
         self.pack_card_embeddings = packs[:, :, :, None] * self.all_card_embeddings[None, None, :, :]
-        pack_card_embeddings_you_can_see = MyTensorClass(self.pack_card_embeddings)
+        pack_card_embeddings_you_can_see = ViewableTensor(self.pack_card_embeddings)
 
         # Get the number of cards in each pack
         self.n_options = tf.reduce_sum(packs, axis=-1, keepdims=True)
-        n_options_you_can_see = MyTensorClass(self.n_options)
+        n_options_you_can_see = ViewableTensor(self.n_options)
 
         # The pack_embedding is the average of the embeddings of the cards in the pack
         self.pack_embeddings = tf.reduce_sum(self.pack_card_embeddings, axis=2) / self.n_options
-        pack_embeddings_you_can_see = MyTensorClass(self.pack_embeddings)
+        pack_embeddings_you_can_see = ViewableTensor(self.pack_embeddings)
 
         # Add the positional information to the card embeddings
         self.embs = self.pack_embeddings * tf.math.sqrt(self.emb_dim) + self.positional_embeddings
-        embs_you_can_see = MyTensorClass(self.embs)
+        embs_you_can_see = ViewableTensor(self.embs)
 
         if training and self.dropout > 0.0:
             self.embs = tf.nn.dropout(self.embs, rate=self.dropout)
-            embs_after_dropout_you_can_see = MyTensorClass(self.embs)
+            embs_after_dropout_you_can_see = ViewableTensor(self.embs)
 
         # Transformer encoder on the pack information
         self.encoder_holder = []
@@ -194,17 +195,17 @@ class DraftBot(tf.Module):
             self.embs, attention_weights_pack = memory_layer(
                 self.embs, positional_masks, training=training
             )  # (batch_size, t, emb_dim)
-            embs_after_encoder_you_can_see = MyTensorClass(self.embs)
-            attention_weights_pack_you_can_see = MyTensorClass(attention_weights_pack)
+            embs_after_encoder_you_can_see = ViewableTensor(self.embs)
+            attention_weights_pack_you_can_see = ViewableTensor(attention_weights_pack)
             self.encoder_holder.append((self.embs, attention_weights_pack))
 
         # Transformer decoder on the pick information
         self.dec_embs = self.card_embedding(picks, training=training)
-        dec_embs_you_can_see = MyTensorClass(self.dec_embs)
+        dec_embs_you_can_see = ViewableTensor(self.dec_embs)
 
         if training and self.dropout > 0.0:
             self.dec_embs = tf.nn.dropout(self.dec_embs, rate=self.dropout)
-            dec_embs_after_dropout_you_can_see = MyTensorClass(self.dec_embs)
+            dec_embs_after_dropout_you_can_see = ViewableTensor(self.dec_embs)
 
         self.decoder_holder = []
         for memory_layer in self.decoder_layers:
@@ -214,19 +215,19 @@ class DraftBot(tf.Module):
                 encoder_output=self.embs,
                 training=training,
             )  # (batch_size, t, emb_dim)
-            dec_embs_after_decoder_you_can_see = MyTensorClass(self.dec_embs)
-            attention_weights_pick_you_can_see = MyTensorClass(attention_weights_pick)
+            dec_embs_after_decoder_you_can_see = ViewableTensor(self.dec_embs)
+            attention_weights_pick_you_can_see = ViewableTensor(attention_weights_pick)
             self.decoder_holder.append((self.dec_embs, attention_weights_pick))
 
         # Mask to remove cards not in the pack as options
         self.mask_for_softmax = 1e9 * (1 - packs)
-        mask_for_softmax_you_can_see = MyTensorClass(self.mask_for_softmax)
+        mask_for_softmax_you_can_see = ViewableTensor(self.mask_for_softmax)
 
         # Compute card rankings
         self.card_rankings = (
             self.output_decoder(self.dec_embs, training=training) * packs - self.mask_for_softmax
         )  # (batch_size, t, n_cards)
-        card_rankings_you_can_see = MyTensorClass(self.card_rankings)
+        card_rankings_you_can_see = ViewableTensor(self.card_rankings)
 
         # Compute Euclidean distances for regularization
         self.emb_dists = (
@@ -239,11 +240,11 @@ class DraftBot(tf.Module):
             * packs
             + self.mask_for_softmax
         )
-        emb_dists_you_can_see = MyTensorClass(self.emb_dists)
+        emb_dists_you_can_see = ViewableTensor(self.emb_dists)
 
         # Compute output probabilities
         self.output = tf.nn.softmax(self.card_rankings)
-        output_you_can_see = MyTensorClass(self.output)
+        output_you_can_see = ViewableTensor(self.output)
 
         if return_attention:
             return self.output, (attention_weights_pack, attention_weights_pick)
@@ -491,9 +492,9 @@ class DraftBot(tf.Module):
         top2 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, k=2) * sample_weight)
         top3 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, k=3) * sample_weight)
         
-        # Wrap tensors with MyTensorClass for inspection (if needed)
-        pred_local = MyTensorClass(pred)
-        true_local = MyTensorClass(true)
+        # Wrap tensors with ViewableTensor for inspection (if needed)
+        # pred_local = ViewableTensor(pred)
+        # true_local = ViewableTensor(true)
         
         # Indices for first picks
         first_picks_indices = [0, 14, 28]
@@ -519,20 +520,6 @@ class DraftBot(tf.Module):
                 'first_picks_top_3': first_picks_top_3,
             }
             
-    # def compute_metrics(self, true, pred, sample_weight=None, **kwargs):
-    #     """
-    #     compute top1, top2, top3 accuracy to display as metrics during training when verbose=True
-    #     """
-    #     if sample_weight is None:
-    #         sample_weight = tf.ones_like(true.shape) / (true.shape[0] * true.shape[1])
-    #     # TODO: this caused a shape error, but didn't previously. Look into in detail later, comment out for now.
-    #     # sample_weight = sample_weight.flatten()
-    #     pred, _ = pred
-    #     top1 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 1) * sample_weight)
-    #     top2 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 2) * sample_weight)
-    #     top3 = tf.reduce_sum(tf.keras.metrics.sparse_top_k_categorical_accuracy(true, pred, 3) * sample_weight)
-        
-    #     return {"top1": top1, "top2": top2, "top3": top3}
 
     def save(self, location):
         """

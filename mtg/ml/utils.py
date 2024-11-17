@@ -91,7 +91,6 @@ def compute_top_k_accuracy(true, preds, sample_weights=None, k=1):
     Returns:
         float: The percentage accuracy computed over the provided samples.
     """
-    import tensorflow as tf
 
     # Flatten tensors to combine batch and sequence dimensions
     true_flat = tf.reshape(true, [-1])
