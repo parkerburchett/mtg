@@ -76,7 +76,10 @@ class Trainer:
         metrics['loss'] = loss
         
         for k, v in metrics.items():
-            metrics[k] = float(v.cpu().numpy())
+            try:
+                metrics[k] = float(v.cpu().numpy())
+            except Exception as e:
+                metrics[k] = float(v)
         return loss, metrics
 
     def train(

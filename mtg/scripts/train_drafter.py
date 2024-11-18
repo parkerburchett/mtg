@@ -46,10 +46,10 @@ def main():
         generator=train_gen,
         val_generator=val_gen,
     )
-    trainer.train(
+    trainer.train_happy_path(
         FLAGS.epochs,
-        print_keys=["prediction_loss", "embedding_loss", "rare_loss", "cmc_loss"],
-        verbose=FLAGS.verbose,
+        # print_keys=["prediction_loss", "embedding_loss", "rare_loss", "cmc_loss"],
+        # verbose=FLAGS.verbose,
     )
     # we run inference once before saving the model in order to serialize it with the right input parameters for inference
     # and we do it with train_gen because val_gen can be None, and this isn't used for validation but serialization
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         help="path/to/fname.pkl for where we should load the expansion object",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="training batch size"
+        "--batch_size", type=int, default=128, help="training batch size"
     )
     parser.add_argument(
         "--train_p", type=float, default=1, help="number in [0,1] for train-val split"
@@ -154,9 +154,9 @@ if __name__ == "__main__":
         help="regularization coefficient for penalizing the model for taking expensive cards when human doesn't",
     )
     parser.add_argument(
-        "--epochs", type=int, default=1, help="number of epochs to train the model"
+        "--epochs", type=int, default=3, help="number of epochs to train the model"
     )
-    parser.add_argument(
+    parser.add_argument( 
         "--verbose",
         type=bool,
         default=True,
